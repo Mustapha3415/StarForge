@@ -773,9 +773,7 @@ mod tests {
     }
 
     fn with_home<T>(f: impl FnOnce() -> T) -> T {
-        let _guard = crate::utils::lock_home_env();
         let home = tempfile::tempdir().expect("temp home");
-        std::env::set_var("HOME", home.path());
         std::env::set_var("USERPROFILE", home.path());
         f()
     }
@@ -857,10 +855,10 @@ mod tests {
         with_home(|| {
             let current = state("GAAA", vec![signer("GB01", 1), signer("GB02", 1)]);
             let outcome = inspect_signer_set(&current, None, true).unwrap();
-            assert_eq!(outcome.changed, false); // first observation: baseline only
+            assert!(!outcome.changed); // first observation: baseline only
 
             let outcome = inspect_signer_set(&current, None, true).unwrap();
-            assert_eq!(outcome.changed, false); // unchanged
+            assert!(!outcome.changed); // unchanged
 
             let grown = state(
                 "GAAA",

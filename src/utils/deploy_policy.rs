@@ -46,6 +46,8 @@ pub struct DeployPolicy {
     pub checklist: Vec<ChecklistItem>,
     /// When true, `deploy --execute` is required before a real deploy proceeds.
     pub require_execute_flag: bool,
+    pub allowed_wasm_imports: Option<Vec<String>>,
+    pub allowed_wasm_exports: Option<Vec<String>>,
 }
 
 impl Default for DeployPolicy {
@@ -56,6 +58,8 @@ impl Default for DeployPolicy {
             required_reviewers: Vec::new(),
             checklist: Vec::new(),
             require_execute_flag: false,
+            allowed_wasm_imports: None,
+            allowed_wasm_exports: None,
         }
     }
 }
@@ -185,8 +189,16 @@ pub fn write_default_policy(path: &Path) -> Result<()> {
                 description: "Update CHANGELOG for this release".into(),
                 required: true,
             },
+            ChecklistItem {
+                id: "wasm_clean_analysis".into(),
+                description: "WASM preflight analysis passed with no unexpected imports/exports"
+                    .into(),
+                required: true,
+            },
         ],
         require_execute_flag: true,
+        allowed_wasm_imports: None,
+        allowed_wasm_exports: None,
     };
 
     let ext = path
@@ -203,7 +215,11 @@ pub fn write_default_policy(path: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn evaluate(policy_path: &Path, policy: &DeployPolicy, context: &DeployContext) -> PolicyReport {
+pub fn evaluate(
+    policy_path: &Path,
+    policy: &DeployPolicy,
+    context: &DeployContext,
+) -> PolicyReport {
     let mut violations = Vec::new();
 
     if !policy.allowed_networks.is_empty()
@@ -248,10 +264,7 @@ pub fn evaluate(policy_path: &Path, policy: &DeployPolicy, context: &DeployConte
                 .unwrap_or_default();
             violations.push(PolicyViolation {
                 rule: "required_reviewers".into(),
-                message: format!(
-                    "Missing required reviewer '{}{}'",
-                    reviewer.username, role
-                ),
+                message: format!("Missing required reviewer '{}{}'", reviewer.username, role),
                 remediation: format!(
                     "Set {} to a comma-separated list including '{}'",
                     ENV_DEPLOY_APPROVERS, reviewer.username
@@ -341,6 +354,8 @@ mod tests {
                 required: true,
             }],
             require_execute_flag: true,
+            allowed_wasm_imports: None,
+            allowed_wasm_exports: None,
         };
         let context = DeployContext {
             network: "mainnet".into(),
@@ -350,7 +365,10 @@ mod tests {
         };
         let report = evaluate(Path::new("policy.toml"), &policy, &context);
         assert!(!report.passed);
-        assert!(report.violations.iter().any(|v| v.rule == "allowed_networks"));
+        assert!(report
+            .violations
+            .iter()
+            .any(|v| v.rule == "allowed_networks"));
         assert!(report
             .violations
             .iter()

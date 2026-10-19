@@ -35,6 +35,17 @@ must deliberately name the account being closed.
 
 ---
 
+## Invocation Tree and Auth Previews
+
+For contract invocations (`starforge contract invoke`), the confirmation screen decodes the `auth` entries returned by the transaction simulation and renders them as a hierarchical invocation tree.
+
+This ensures operators can see exactly which nested sub-invocations they are authorizing before signing, mitigating blind-signing attacks.
+- **Contract Aliases:** Known contracts (defined in config) are displayed with their aliases. Unknown contracts are flagged.
+- **Transfers and Approvals:** Critical token operations like `transfer` and `approve` are visually highlighted.
+- **Hardware Wallets:** The same decoded invocation tree is displayed when signing via hardware wallet (Ledger/Trezor).
+
+---
+
 ## Automation and CI
 
 Non-interactive environments (CI, piped stdin, `--non-interactive`) fail fast
@@ -50,7 +61,7 @@ with a clear error instead of blocking on stdin.
 
 To skip destructive confirmations in controlled automation, set **both**:
 
-```bash
+```bash norun
 export STARFORGE_UNSAFE_SKIP_CONFIRMATION=1
 starforge deploy --network mainnet --execute --yes …
 ```

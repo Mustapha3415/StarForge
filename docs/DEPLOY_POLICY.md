@@ -18,7 +18,7 @@ Override with `starforge deploy --policy <PATH>`.
 
 Generate a starter file:
 
-```bash
+```bash norun
 starforge deploy-policy init starforge-deploy-policy.toml
 ```
 
@@ -29,13 +29,15 @@ for a complete example.
 
 ## Schema
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `organization` | string (optional) | Display name in reports |
-| `allowed_networks` | string[] | Networks permitted for deploy (e.g. `testnet`, `mainnet`) |
-| `require_execute_flag` | bool | When true, real deploys must pass `--execute` |
-| `required_reviewers` | table[] | Each entry: `username`, optional `role` |
-| `checklist` | table[] | Each entry: `id`, `description`, `required` (default true) |
+| Field                  | Type                | Description                                                |
+| ---------------------- | ------------------- | ---------------------------------------------------------- |
+| `organization`         | string (optional)   | Display name in reports                                    |
+| `allowed_networks`     | string[]            | Networks permitted for deploy (e.g. `testnet`, `mainnet`)  |
+| `require_execute_flag` | bool                | When true, real deploys must pass `--execute`              |
+| `required_reviewers`   | table[]             | Each entry: `username`, optional `role`                    |
+| `checklist`            | table[]             | Each entry: `id`, `description`, `required` (default true) |
+| `allowed_wasm_imports` | string[] (optional) | Allowed WASM import namespaces (e.g. `["a", "b"]`)         |
+| `allowed_wasm_exports` | string[] (optional) | Allowed WASM exports (e.g. `["__invoke"]`)                 |
 
 TOML and YAML are both supported; use the file extension to select the parser.
 
@@ -78,15 +80,15 @@ checklist:
 
 At deploy time, StarForge reads:
 
-| Source | Purpose |
-|--------|---------|
-| Deploy flags | `--network`, `--execute`, `--checklist` |
+| Source                       | Purpose                                                          |
+| ---------------------------- | ---------------------------------------------------------------- |
+| Deploy flags                 | `--network`, `--execute`, `--checklist`                          |
 | `STARFORGE_DEPLOY_APPROVERS` | Comma-separated identities (must include all required reviewers) |
-| `STARFORGE_DEPLOY_CHECKLIST` | Comma-separated checklist ids satisfied for this release |
+| `STARFORGE_DEPLOY_CHECKLIST` | Comma-separated checklist ids satisfied for this release         |
 
 Example:
 
-```bash
+```bash norun
 export STARFORGE_DEPLOY_APPROVERS="security-lead,release-manager"
 export STARFORGE_DEPLOY_CHECKLIST="audit-passed,changelog-updated"
 
@@ -99,7 +101,7 @@ starforge deploy \
 
 Or pass checklist ids on the command line:
 
-```bash
+```bash norun
 starforge deploy --wasm ./contract.wasm --execute \
   --checklist audit-passed,changelog-updated \
   --policy starforge-deploy-policy.toml
@@ -113,7 +115,7 @@ Violations produce actionable errors naming the rule, message, and remediation.
 
 Validate policy files in CI without deploying:
 
-```bash
+```bash norun
 starforge deploy-policy check --config starforge-deploy-policy.toml \
   --network testnet \
   --execute \
@@ -141,5 +143,15 @@ Example GitHub Actions step:
 
 ## Related docs
 
+- [DEPLOY_CHECKLIST.md](DEPLOY_CHECKLIST.md) — live pre-mainnet artifact, simulation, balance, authorization, and network checks
 - [CONFIRMATION_UX.md](CONFIRMATION_UX.md) — destructive confirmation prompts
 - [COMMAND_REFERENCE.md](COMMAND_REFERENCE.md) — deploy flags
+
+---
+
+## WASM Clean Analysis
+
+The `wasm_clean_analysis` checklist item integrates the WASM pre-flight analyzer directly into your deployment pipeline.
+When the analyzer validates your compiled `.wasm` file, it cross-references the module's imports and exports against the `allowed_wasm_imports` and `allowed_wasm_exports` lists in your deploy policy (which defaults to common Soroban host function namespaces).
+
+If no unexpected imports or exports are found, `wasm_clean_analysis` is automatically marked as satisfied. If there are findings (e.g. unexpected OS-level imports or custom exports not explicitly permitted), the deploy command will block if `wasm_clean_analysis` is a required checklist item, prompting developers to review and update their allowlists or optimize their modules.

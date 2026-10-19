@@ -4,6 +4,8 @@ export interface ITemplate {
   version: string;
   description: string;
   author: string;
+  authors?: string[];
+  attribution?: string;
   tags: string[];
   // Structured functionality keywords (e.g. ["escrow", "refund", "timeout"])
   // used by search to match "find a template that does X" style queries
@@ -13,9 +15,13 @@ export interface ITemplate {
   repository?: string;
   homepage?: string;
   documentation?: string;
+  /** Markdown README displayed by the public registry portal. */
+  readme?: string;
   downloads: number;
   verified: boolean;
   publisherId: string;
+  namespace?: string;
+  organizationId?: string;
   createdAt: Date;
   updatedAt: Date;
   ratings: {
@@ -72,7 +78,7 @@ export class TemplateStore {
     query: string,
     tags?: string[],
     verified?: boolean,
-    minQuality?: number,
+    _minQuality?: number,
   ): Promise<ITemplate[]> {
     const results: ITemplate[] = [];
     const queryLower = query.toLowerCase();
@@ -154,8 +160,28 @@ export class TemplateStore {
     return count;
   }
 
+  async updateOrganizationForName(
+    name: string,
+    organizationId: string,
+    namespace: string,
+  ): Promise<number> {
+    let count = 0;
+    for (const [id, tpl] of this.templates.entries()) {
+      if (tpl.name.toLowerCase() === name.toLowerCase()) {
+        this.templates.set(id, {
+          ...tpl,
+          namespace,
+          organizationId,
+          publisherId: "organization",
+          updatedAt: new Date(),
+        });
+        count++;
+      }
+    }
+    return count;
+  }
+
   async clear(): Promise<void> {
     this.templates.clear();
   }
 }
-

@@ -9,11 +9,15 @@ Welcome to StarForge! This guide will help you get started contributing to the p
 - [Development Setup](#development-setup)
 - [Building the Project](#building-the-project)
 - [Running Tests](#running-tests)
+- [Golden CLI Snapshot Tests](#golden-cli-snapshot-tests)
+- [Documentation Snippets](#documentation-snippets)
 - [Development Workflow](#development-workflow)
 - [Code Quality](#code-quality)
 - [Submitting a Pull Request](#submitting-a-pull-request)
+- [Writing Plugins](#writing-plugins)
 - [Contributing to AI Features](#contributing-to-ai-features)
 - [Common Issues & Troubleshooting](#common-issues--troubleshooting)
+- [Flaky Tests & Quarantine](#flaky-tests--quarantine)
 - [Questions & Support](#questions--support)
 
 ---
@@ -26,7 +30,7 @@ Welcome to StarForge! This guide will help you get started contributing to the p
 4. **Run tests**: `cargo test`
 5. **Create a branch**: `git checkout -b feat/your-feature-name`
 6. **Make changes** and commit with clear messages
-7. **Push and open a Pull Request** against `master`
+7. **Push and open a Pull Request** against the `main` branch
 
 ---
 
@@ -34,7 +38,19 @@ Welcome to StarForge! This guide will help you get started contributing to the p
 
 ### Rust
 
-StarForge requires **Rust 1.80 or later**. 
+StarForge requires **Rust 1.80 or later** (`rust-version` in `Cargo.toml`).
+
+#### MSRV policy
+
+- The Minimum Supported Rust Version (MSRV) tracks approximately **N−3** stable
+  releases (today: 1.80 while latest stable is ~1.83+).
+- MSRV bumps happen only in **minor** StarForge releases, never in patch releases.
+- Exact dependency pins (`=x.y.z`) are avoided unless a justification comment sits
+  next to the pin (usually an MSRV or API-stability hold). Prefer caret ranges and
+  rely on `.cargo/config.toml` `incompatible-rust-versions = "fallback"` plus the
+  weekly `latest-deps` CI job to catch drift.
+- When raising MSRV, update `Cargo.toml` `rust-version`, the `MSRV (Rust …)` CI
+  job, `CONTRIBUTING.md`, and `docs/BRANCH_PROTECTION.md` in the same PR.
 
 #### Install Rust
 
@@ -169,6 +185,31 @@ The project includes quick smoke tests to verify basic functionality:
 cargo test --test cli_smoke
 ```
 
+### Golden CLI Snapshot Tests
+
+`tests/cli_golden.rs` pins the observable output (stdout, stderr, exit code)
+of `starforge` against committed snapshots under `tests/cmd/`. It is a
+dependency-free stand-in for `trycmd`/`snapbox` (those crates are not in
+`Cargo.lock`, and CI asserts the lockfile is unchanged), using the same
+`TRYCMD=overwrite` workflow:
+
+```bash
+# Compare against the committed corpus
+cargo test --locked --test cli_golden
+
+# Intentionally refresh the snapshots (or run: bash scripts/gen-cli-snapshots.sh)
+TRYCMD=overwrite cargo test --locked --test cli_golden
+git diff -- tests/cmd
+```
+
+A case whose snapshot file is missing is generated automatically and passes
+(with a notice), so adding a new `tests/cmd/<case>.toml` never turns CI red
+before its snapshot is committed. Only snapshots whose exact bytes are known
+without running the binary are committed; run the `TRYCMD=overwrite` command
+above to populate the rest of the corpus. See
+[docs/CLI_GOLDEN_TESTS.md](docs/CLI_GOLDEN_TESTS.md) for the full workflow,
+determinism rules, and corpus layout.
+
 ### Run Optional-Feature Tests (hardware wallets)
 
 Ledger and Trezor support lives behind the `hardware-wallet` Cargo feature
@@ -275,6 +316,47 @@ The project permits narrow, documented exceptions in `deny.toml`:
 cargo test --test cargo_deny_config
 ```
 
+## Documentation Snippets
+
+The shell examples in `README.md` and `docs/` are checked in CI by the **Docs
+Snippets** job ([`scripts/docs-snippets.py`](scripts/docs-snippets.py)). Every
+shell code block (`bash`, `sh`, `shell`, `console`, `powershell`, ...) must say
+whether it runs, with a word after the language on the opening fence:
+
+| Fence | Meaning |
+|---|---|
+| `` ```bash run `` | Executed in CI and must exit 0. |
+| `` ```bash run fails `` | Executed and must exit **non-zero**. Use it to document an error. |
+| `` ```bash run local `` | Executed only when a local network is available (`--local-network`). |
+| `` ```bash norun `` | Never executed. Use it for snippets that need secrets, funded accounts, mainnet, Docker, hardware wallets, Ollama, or placeholder values like `<CONTRACT_ID>`. |
+
+GitHub still highlights `` ```bash run `` as Bash. An unannotated shell block
+fails the job, and so does an untagged block containing a `starforge` command.
+
+How `run` blocks execute:
+
+- Each Markdown file gets a fresh temporary `HOME` and working directory. Its
+  `run` blocks execute **in order** in that sandbox, so a later block can use
+  a wallet or project that an earlier block created.
+- Each block runs as `bash -euo pipefail` with the just-built `starforge`
+  first on `PATH` and `STARFORGE_NON_INTERACTIVE=1`, so a command waiting on a
+  prompt fails instead of hanging.
+- In `console` blocks, only lines that start with `$ ` run. Other lines are
+  treated as sample output.
+- Failures are reported as `path:line` and shown as annotations on the PR.
+
+Prefer `run` whenever a snippet can work offline. If a command needs the
+network, put a runnable offline variant next to it (for example `--help` or
+`--dry-run`) instead of marking everything `norun`.
+
+```bash norun
+cargo build
+python3 scripts/docs-snippets.py                     # lint + run README.md and docs/
+python3 scripts/docs-snippets.py docs/USAGE.md       # a single file
+python3 scripts/docs-snippets.py --lint-only         # annotations only, no build needed
+python3 scripts/docs-snippets.py --try-unannotated docs/NEW.md   # triage new docs
+```
+
 ---
 
 ## Development Workflow
@@ -377,15 +459,25 @@ git push origin feat/issue-XXX-description
 
 Then open a Pull Request on GitHub. Use the provided template and follow the checklist.
 
+### 8. Architectural Changes & ADRs
+
+If your PR introduces or alters major architectural patterns (such as client binding formats, plugin ABIs, telemetry defaults, simulation engines, or storage schemas), you must include an **Architecture Decision Record (ADR)**.
+- See the [ADR Index and Process](docs/adr/README.md).
+- Copy [`docs/adr/template.md`](docs/adr/template.md) and record the context, considered options, and decision outcomes.
+
 ---
 
-## Code Quality and Security Logging
+## Code Quality, Security, and Incident Response
 
 StarForge enforces consistent code quality through automated CI checks. See [CI_ENFORCEMENT.md](CI_ENFORCEMENT.md) for full details.
 
-### Security Logging Requirements
+### Security Logging and Incident Response Requirements
 
-All security-relevant operations must be properly logged for auditability and debugging. See [SECURITY_LOGGING_GUIDE.md](SECURITY_LOGGING_GUIDE.md) for detailed requirements. Key principles:
+All security-relevant operations must be properly logged for auditability and debugging:
+- See [SECURITY_LOGGING_GUIDE.md](SECURITY_LOGGING_GUIDE.md) for logging standards.
+- In the event of suspected secret key or credential leakage, immediately follow the [Incident Response Runbook](docs/SECURITY_INCIDENT_RUNBOOK.md).
+
+Key principles:
 
 - **Log all security operations** - Wallet creation, encryption, deployment, plugin loading, etc.
 - **Never log secrets** - Private keys, passphrases, encryption keys must be redacted
@@ -491,6 +583,8 @@ All of these are checked in CI. See [DOCTEST_GUIDELINES.md](DOCTEST_GUIDELINES.m
 
 StarForge enforces strict branch protections on the `master` branch to guarantee codebase stability, correctness, and security.
 
+> **A pull request is merged only when every required CI check is green on its latest commit _and_ the branch has no merge conflicts with `master`.** The authoritative list of required checks, and how maintainers configure them, is in [docs/BRANCH_PROTECTION.md](docs/BRANCH_PROTECTION.md).
+
 #### 1. Required CI Status Checks
 Every Pull Request must achieve passing status on all required CI checks before it can be merged. The required status checks are:
 
@@ -499,14 +593,16 @@ Every Pull Request must achieve passing status on all required CI checks before 
 | **Rustfmt** | Code formatting standards | `cargo fmt --all --check` |
 | **MSRV (Rust 1.80)** | Rust 1.80 MSRV compilation | `cargo check --locked --workspace` |
 | **Cargo Deny** | Dependency security & license audit | `cargo deny check --all-features` |
-| **Build and Test** | Full build & test suite | `cargo build --locked` & `cargo test --locked` |
-| **JSON Contract Stability** | CLI `--json` output schema stability | `cargo test --test json_contract_stability --locked` |
+| **Secure Defaults Audit** | Security-sensitive defaults stay safe | `cargo test --test secure_defaults_audit --locked` |
+| **Documentation Tests** | Doc examples compile and pass | `cargo test --doc --locked` |
+| **Feature Matrix** | Full build, JSON contract stability & test suite across feature combinations (default, no-default, ai, hardware) | `cargo build`, `cargo test` with various `--features` |
+| **Docs Cheat Sheet (anti-drift)** | Generated command cheat sheet is current | `cargo build --locked` then `git diff --exit-code -- docs/COMMAND_CHEATSHEET.md` |
 | **Clippy Lint** | Zero lint warnings allowed | `cargo clippy --all-features --locked -- -D warnings` |
 | **CLI Smoke Tests (Linux)** | End-to-end CLI integration | `cli_cross_platform`, `cli_smoke`, `scripts/e2e-smoke.sh` |
-| **macOS & Windows Tests** | Cross-platform CLI validation | `cli_cross_platform`, `cli_smoke` |
+| **macOS CLI Tests** / **Windows CLI Tests** | Cross-platform CLI validation | `cli_cross_platform`, `cli_smoke` |
 
 #### 2. Conflict-Free Requirement
-- All PRs must have **zero merge conflicts** against `master`.
+- All PRs must have **zero merge conflicts** against `master`; GitHub blocks the merge button while conflicts exist.
 - PR branches must be rebased on the latest `master` before merge.
 - If conflicts arise during review, rebase locally and force-push to your PR branch:
   ```bash
@@ -541,13 +637,15 @@ To avoid CI failures and ensure your PR passes all merge gates on the first try,
 ```
 
 The script automatically executes:
-1. **Git hygiene check**: Verifies no unresolved conflict markers remain and checks divergence from `master`
+1. **Git hygiene & conflict check**: Fails on unresolved conflict markers, an in-progress merge/rebase, or a trial merge into `origin/master` that would conflict
 2. **Rustfmt**: Verifies all code matches formatting standards
 3. **Workspace check**: Verifies compilation across the entire workspace
-4. **Clippy**: Verifies zero warnings with `-D warnings`
+4. **Clippy**: Verifies zero warnings with `--all-features -- -D warnings`, exactly as CI runs it
 5. **Contract stability**: Verifies JSON contract schema invariants
-6. **Tests**: Executes unit tests, integration tests, and smoke tests
-7. **Cargo Deny**: Audits dependencies for vulnerabilities and license issues (if `cargo-deny` is installed)
+6. **Secure defaults audit**: Runs `secure_defaults_audit`
+7. **Tests**: Executes unit and smoke tests (`--all` adds the full suite, doctests, and cross-platform CLI tests)
+8. **Drift checks**: Fails if the build changes `docs/COMMAND_CHEATSHEET.md` or `Cargo.lock`
+9. **Cargo Deny**: Audits dependencies for vulnerabilities and license issues (if `cargo-deny` is installed)
 
 The script exits with a **non-zero status code** if any check fails, reporting exactly which gate needs attention.
 
@@ -583,15 +681,31 @@ When opening a PR, fill out the template with:
 
 ### PR Guidelines
 
-- **Pass All CI Gates**: PRs cannot merge with failing status checks.
+- **Pass All CI Gates**: PRs cannot merge unless every required status check in [docs/BRANCH_PROTECTION.md](docs/BRANCH_PROTECTION.md) is green on the latest commit.
 - **Ensure No Conflicts**: Keep your branch up to date with `master`.
-- **Run Preflight Locally**: Always execute `./scripts/preflight-pr.sh` before pushing.
+- **Run Preflight Locally**: Always execute [`./scripts/preflight-pr.sh`](scripts/preflight-pr.sh) before opening or updating a PR; it exits non-zero when any merge gate fails.
 - **Keep PRs focused**: One issue per PR when possible
 - **Keep PRs scoped**: Smaller, focused PRs are easier to review and merge faster
 - **Write clear descriptions**: Explain the "why" not just the "what"
 - **Reference issues**: Use `closes #XXX` to automatically link issues
 - **Test thoroughly**: Include test cases for both happy path and edge cases
 - **Update docs**: If your changes affect user-facing behavior, update docs
+
+---
+
+## Writing Plugins
+
+Building a StarForge plugin, or changing one of the example plugins? Start with
+the [plugin authoring cookbook](docs/plugins/cookbook.md). It walks through a
+hello-world plugin, capabilities, testing, signing, trust metadata, publishing
+and ABI compatibility, using the example plugins in
+[`examples/plugins/`](examples/plugins/). CI builds and tests those examples in
+the **Plugin Cookbook Examples** job; run the same check locally with:
+
+```bash
+cp Cargo.lock examples/plugins/Cargo.lock
+cargo test --manifest-path examples/plugins/Cargo.toml --workspace
+```
 
 ---
 
@@ -692,6 +806,71 @@ This document confirms:
 
 ---
 
+## Flaky Tests & Quarantine
+
+A **flaky test** is one that fails and then passes when it is retried. Flakes
+waste reviewer time and train people to ignore red CI, so StarForge runs the
+test suite through [`cargo nextest`](https://nexte.st) with retries enabled
+(see [`.config/nextest.toml`](.config/nextest.toml)) and reports every test that
+passed only on a retry.
+
+### Detecting flakes
+
+The [Flaky Test Detection workflow](.github/workflows/flaky-tests.yml) runs
+nightly and on pull requests that touch the test suite. It publishes two
+artifacts:
+
+| Artifact | Contents |
+|---|---|
+| `flaky-test-report-nextest` | `flaky-report.md` and `flaky-report.json` — the tests that passed only on a retry |
+| `nextest-junit-report` | The raw nextest JUnit XML (`target/nextest/ci/junit.xml`) |
+
+Run the same detection locally:
+
+```bash
+cargo install cargo-nextest --locked          # once
+cargo nextest run --profile ci                # retries failures, writes JUnit XML
+python3 scripts/flaky-report.py               # writes flaky-report.md + flaky-report.json
+```
+
+### Quarantine process
+
+When a flake cannot be fixed in the same pull request, quarantine it by adding
+one entry to [`.github/flaky-quarantine.json`](.github/flaky-quarantine.json):
+
+```json
+{
+  "test": "starforge::utils::wallet::creates_wallet_from_seed",
+  "owner": "@your-github-handle",
+  "issue": 924,
+  "quarantinedOn": "2026-09-26",
+  "deadline": "2026-10-26",
+  "reason": "Intermittent filesystem timing on the CI runner."
+}
+```
+
+The rules are intentionally strict so quarantines do not become permanent:
+
+1. **Every entry names one owner and one deadline.** `test` is the full nextest
+   id from `flaky-report.md`; `owner` is a GitHub handle (`@name`); `deadline`
+   is an ISO date (`YYYY-MM-DD`).
+2. **The deadline is at most 30 days out.** Longer-lived flakes should be fixed,
+   not hidden.
+3. **Quarantined tests still run.** Quarantine marks the flake as known and
+   assigns accountability; it does not delete or skip coverage. The report
+   lists each flake next to its owner and deadline.
+4. **Expired entries are escalated.** Once the deadline passes, the flaky
+   report marks the entry `expired` and the owner must fix the test,
+   re-quarantine it with a new deadline and a tracking issue, or remove it with
+   a justification in the pull request.
+5. **Fixes beat quarantines.** When you fix a flake, add deterministic coverage
+   for the failure mode and delete its entry in the same pull request.
+
+Reviewers should reject a quarantine entry that is missing an owner, a deadline,
+or a linked tracking issue.
+
+---
+
 ## Questions & Support
 
 - **Documentation**: See [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) for in-depth development topics
@@ -707,3 +886,4 @@ This document confirms:
 Contributors are recognized in the project and may participate in the [Stellar Wave Program](https://www.drips.network/wave/stellar) for monetary rewards.
 
 Thank you for contributing to StarForge! 🚀
+.....
